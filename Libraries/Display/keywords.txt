@@ -1,0 +1,12 @@
+# Keypad Library data types
+Display	KEYWORD1
+
+# Keypad Library methods & functions
+ShowNum		KEYWORD2
+ShowText	KEYWORD2
+ShowScrollText	KEYWORD2
+Wait		KEYWORD2
+Clear		KEYWORD2
+
+# List of objects created in the example sketches.
+
