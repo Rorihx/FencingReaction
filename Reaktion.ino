@@ -257,6 +257,7 @@ class DebugMode : public Mode
     virtual mode start_falling();
     virtual mode start_rising();
     virtual mode tip_falling();
+    virtual mode tip_rising();
   private:
     int level;
     int modeswitch;
@@ -301,9 +302,20 @@ Mode::mode DebugMode::tip_falling()
 {
   disp.Clear();
   textToShow = ("F OK");
-  digitalWrite(ledPin, HIGH);
+  delay (100);
+  if (digitalRead(targetPin) == 0) {
+     digitalWrite(ledPin, HIGH);
+  }
   Serial.println("Target: " + String(digitalRead(targetPin)));
-  starttime = millis();
+
+  return NOCHANGE;
+}
+
+Mode::mode DebugMode::tip_rising()
+{
+  disp.Clear();
+  textToShow = ("DBG");
+  digitalWrite(ledPin, LOW);
 
   return NOCHANGE;
 }
@@ -341,8 +353,8 @@ Mode::mode DebugMode::loop()
   }
   if (millis() - starttime > 1000)
   {
-    digitalWrite(ledPin, LOW);
-    textToShow = "Dbug";
+/*    digitalWrite(ledPin, LOW);
+    textToShow = "Dbug"; */
   }
   disp.ShowText(textToShow);
   return NOCHANGE;
