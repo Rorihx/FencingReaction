@@ -46,15 +46,19 @@ class Mode {
     enum mode { NOCHANGE = -1, DEBUG, OFFLINE, WAITING, RUNNING, SHOWING };
     virtual mode loop() = 0;
     virtual void setup() = 0;
+    // action when button "start" is pressed
     virtual mode start_falling() {
       return NOCHANGE;
     }
+    // action when button "start" is released
     virtual mode start_rising() {
       return NOCHANGE;
     }
+    // action when tip of epee is pressed
     virtual mode tip_falling() {
       return NOCHANGE;
     }
+    // action when tip of epee is released
     virtual mode tip_rising() {
       return NOCHANGE;
     }
@@ -62,10 +66,13 @@ class Mode {
 
 class OfflineMode : public Mode
 {
+  private: 
+    bool start_active;
   public:
-    OfflineMode() {}
+    OfflineMode() : start_active(false) {}
     virtual mode loop();
     virtual mode start_falling();
+    virtual mode start_rising();
     virtual mode tip_falling();
     virtual mode tip_rising();
     void setup() {}
@@ -76,8 +83,23 @@ Mode::mode OfflineMode::loop() {
   return NOCHANGE;
 }
 Mode::mode OfflineMode::start_falling() {
+  start_active = true;
   digitalWrite(ledPin, LOW);
-  return WAITING;
+  starttime = millis();
+  return NOCHANGE;
+}
+Mode::mode OfflineMode::start_rising() {
+  digitalWrite(ledPin, LOW);
+
+  if (start_active == false)
+    return NOCHANGE;
+
+  start_active = false;
+  
+  if (millis()-starttime>3000)
+    return DEBUG;
+  else
+    return WAITING;
 }
 Mode::mode OfflineMode::tip_falling() {
   digitalWrite(ledPin, HIGH);
@@ -178,6 +200,7 @@ Mode::mode RunMode::tip_falling() {
   }
 }
 
+// ShowMode: mode when showing result
 class ShowMode : public Mode
 {
   private:
@@ -232,6 +255,7 @@ class DebugMode : public Mode
     virtual mode loop();
     virtual void setup();
     virtual mode start_falling();
+    virtual mode start_rising();
     virtual mode tip_falling();
   private:
     int level;
@@ -246,7 +270,7 @@ void DebugMode::setup()
   modeswitch  = digitalRead(modepin2) * 2 + digitalRead(modepin1);
   starttime = 0;
   textToShow = "Dbug";
-  // Serial.println("Debug");
+  Serial.println("Debug");
 
   for (int i=1;i<8;++i)
     pinMode(i, INPUT_PULLUP);
@@ -258,13 +282,30 @@ Mode::mode DebugMode::start_falling()
   textToShow = ("S OK");
   digitalWrite(ledPin, HIGH);
   starttime = millis();
+
+  return NOCHANGE;
 }
+
+Mode::mode DebugMode::start_rising()
+{
+  disp.Clear();
+  textToShow = ("DBG");
+  digitalWrite(ledPin, LOW);
+  
+  if ( (millis()-starttime) > 3000)
+    return OFFLINE;
+  return NOCHANGE;
+}
+
 Mode::mode DebugMode::tip_falling()
 {
   disp.Clear();
   textToShow = ("F OK");
   digitalWrite(ledPin, HIGH);
+  Serial.println("Target: " + String(digitalRead(targetPin)));
   starttime = millis();
+
+  return NOCHANGE;
 }
 
 Mode::mode DebugMode::loop()
@@ -284,7 +325,7 @@ Mode::mode DebugMode::loop()
   {
     disp.Clear();
     textToShow = ("M  " + String(currmodeswitch));
-    Serial.println(textToShow);
+    Serial.println("Mode " + String(currmodeswitch));
     modeswitch = currmodeswitch;
     starttime = millis();
   }
@@ -293,10 +334,10 @@ Mode::mode DebugMode::loop()
   if (currlevel != level)
   {
     disp.Clear();
-    textToShow = ("L  " + String(currlevel));
-    Serial.println(textToShow);
+    textToShow = ("Level  " + String(currlevel));
+    // Serial.println(textToShow);
     level = currlevel;
-    starttime = millis();
+    // starttime = millis();
   }
   if (millis() - starttime > 1000)
   {
@@ -403,6 +444,13 @@ void loop() {
   {
     Serial.println("start falling edge");
     Mode::mode newmode = mymodes->start_falling();
+    mymodes.switchMode(newmode);
+  }
+
+  if (startButton.risingEdge())
+  {
+    Serial.println("start rising edge");
+    Mode::mode newmode = mymodes->start_rising();
     mymodes.switchMode(newmode);
   }
 
