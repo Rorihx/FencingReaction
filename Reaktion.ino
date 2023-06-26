@@ -1,4 +1,4 @@
-// (c) SGS Erlangen 2021-2023
+// (copyleft) SGS Erlangen 2021-2023
 // Autor: Robert Risack
 
 #include <Display.h>	// eigene Library zur Ansteuerung des Display
@@ -10,7 +10,10 @@
 int analogReadLevel(int pin, int levels)
 {
   long value = analogRead(pin);
-  return (levels - 1) - value * 10 / 1024;
+  // value: 0 - 1024, durch Vorwiderstand ca.: 512-1024
+  // level: 0-9
+  // 
+  return (levels - 1) - (value-500) * 10 / (1024-500);
 }
 
 const int modepin1 = 5; // mode switch pin 1
@@ -28,7 +31,9 @@ const int reactPin = 12; // fencing weapon button
 const int waittimePin = A1;
 
 Bounce2::Button  startButton = Bounce2::Button ();
-Bounce reactButton = Bounce();
+Bounce2::Button  reactButton = Bounce2::Button ();
+Bounce2::Button  targetButton = Bounce2::Button ();
+
 unsigned long starttime;
 
 
@@ -96,10 +101,14 @@ Mode::mode OfflineMode::start_rising() {
 
   start_active = false;
   
-  if (millis()-starttime>3000)
-    return DEBUG;
-  else
+  if (starttime>0 && millis()-starttime>3000) {
+    starttime = 0;
+    return DEBUG;    
+  }
+  else {
+    starttime = 0;
     return WAITING;
+  }
 }
 Mode::mode OfflineMode::tip_falling() {
   digitalWrite(ledPin, HIGH);
@@ -178,7 +187,7 @@ Mode::mode RunMode::loop() {
   float sek = (stoptime % 6000000) / 1000.0;
   m_reactiontime = sek;
   
-  disp.ShowNum2(m_reactiontime, 2);
+  disp.ShowNum2(m_reactiontime, 4);
   return NOCHANGE;
 }
 Mode::mode RunMode::start_falling() {
@@ -189,7 +198,7 @@ Mode::mode RunMode::start_falling() {
 }
 Mode::mode RunMode::tip_falling() {
   // end reaction and print reaction time
-  delay(100);
+  delay(10);
   if (digitalRead(targetPin) == 0)
   {
     digitalWrite(ledPin, LOW);
@@ -222,11 +231,12 @@ class ShowMode : public Mode
 
 Mode::mode ShowMode::loop()
 {
-  disp.ShowNum2(m_showvalue, 2);
+  disp.ShowNum2(m_showvalue, 4);
   switch (modeswitch())
   {
   // show time for 10 seconds
     case MODESWITCH_NORMAL:
+    case 0:
       if (m_starttime + 10000 < millis())
         return OFFLINE;
       else
@@ -239,6 +249,8 @@ Mode::mode ShowMode::loop()
       else
         return NOCHANGE;
       break;
+    default:
+      return 0; // DEBUG
   }
 }
 Mode::mode ShowMode::start_falling() {
@@ -248,6 +260,9 @@ Mode::mode ShowMode::start_falling() {
 
 class DebugMode : public Mode
 {
+  private:
+   unsigned long pressedtime;
+   unsigned long displayresettime;
   public:
     DebugMode() {
       setup();
@@ -258,6 +273,8 @@ class DebugMode : public Mode
     virtual mode start_rising();
     virtual mode tip_falling();
     virtual mode tip_rising();
+    virtual mode target_falling();
+    virtual mode target_rising();
   private:
     int level;
     int modeswitch;
@@ -269,7 +286,8 @@ void DebugMode::setup()
 {
   level = analogReadLevel(waittimePin, 10);
   modeswitch  = digitalRead(modepin2) * 2 + digitalRead(modepin1);
-  starttime = 0;
+  displayresettime = 0;
+  pressedtime = 0;
   textToShow = "Dbug";
   Serial.println("Debug");
 
@@ -282,7 +300,7 @@ Mode::mode DebugMode::start_falling()
   disp.Clear();
   textToShow = ("S OK");
   digitalWrite(ledPin, HIGH);
-  starttime = millis();
+  pressedtime = millis();
 
   return NOCHANGE;
 }
@@ -293,20 +311,26 @@ Mode::mode DebugMode::start_rising()
   textToShow = ("DBG");
   digitalWrite(ledPin, LOW);
   
-  if ( (millis()-starttime) > 3000)
+  if ( pressedtime != 0 && (millis()-pressedtime) > 3000) {
+    pressedtime = 0;
     return OFFLINE;
+  }
   return NOCHANGE;
 }
 
 Mode::mode DebugMode::tip_falling()
 {
   disp.Clear();
-  textToShow = ("F OK");
-  delay (100);
-  if (digitalRead(targetPin) == 0) {
+  textToShow = ("Epee OK");
+  Serial.println("Epee ok");
+  int target = digitalRead(targetPin);
+  delay (10);
+  target = target + digitalRead(targetPin);
+  if (target == 0) {
      digitalWrite(ledPin, HIGH);
+     textToShow = ("Epee+Target OK");
+  Serial.println("Epee+Target ok");
   }
-  Serial.println("Target: " + String(digitalRead(targetPin)));
 
   return NOCHANGE;
 }
@@ -314,32 +338,57 @@ Mode::mode DebugMode::tip_falling()
 Mode::mode DebugMode::tip_rising()
 {
   disp.Clear();
-  textToShow = ("DBG");
+  textToShow = ("Debug");
   digitalWrite(ledPin, LOW);
 
   return NOCHANGE;
 }
 
+Mode::mode DebugMode::target_rising()
+{
+  if (modeswitch==3){
+    disp.Clear();
+    textToShow = ("T HIGH");
+    digitalWrite(ledPin, HIGH);
+
+    displayresettime = millis();
+  } 
+  return NOCHANGE;
+}
+
+Mode::mode DebugMode::target_falling()
+{
+  if (modeswitch==3){
+    disp.Clear();
+    textToShow = ("T LOW");
+    digitalWrite(ledPin, LOW);
+
+    displayresettime = millis();
+  }
+  return NOCHANGE;
+}
+
+
 Mode::mode DebugMode::loop()
 {
-  /*
-  for (int i=1;i<8;++i)
-    {
-      Serial.print(i); Serial.print(" - ");
-      Serial.println(digitalRead(i));
-    }
-      Serial.println(" ");
-    delay(1000);
-    return NOCHANGE;*/
+
+  targetButton.update();
+
+  if (targetButton.rose())
+    target_rising();
+
+  if (targetButton.fell())
+    target_falling();
+
   int currmodeswitch = digitalRead(modepin2) * 2 + digitalRead(modepin1);
 
   if (currmodeswitch != modeswitch )
   {
     disp.Clear();
-    textToShow = ("M  " + String(currmodeswitch));
+    textToShow = ("Mode " + String(currmodeswitch));
     Serial.println("Mode " + String(currmodeswitch));
     modeswitch = currmodeswitch;
-    starttime = millis();
+    displayresettime = millis();
   }
 
   int currlevel = analogReadLevel(waittimePin, 10);
@@ -347,14 +396,17 @@ Mode::mode DebugMode::loop()
   {
     disp.Clear();
     textToShow = ("Level  " + String(currlevel));
-    // Serial.println(textToShow);
+    Serial.println(textToShow);
     level = currlevel;
-    // starttime = millis();
+    displayresettime = millis();
   }
-  if (millis() - starttime > 1000)
+  if (displayresettime != 0 && millis() - displayresettime > 2000)
   {
-/*    digitalWrite(ledPin, LOW);
-    textToShow = "Dbug"; */
+/*    digitalWrite(ledPin, LOW); */
+    textToShow = "Debug";
+    Serial.println("debug");
+    displayresettime = 0;
+    digitalWrite(ledPin, LOW);
   }
   disp.ShowText(textToShow);
   return NOCHANGE;
@@ -412,6 +464,8 @@ void setup() {
   pinMode(targetPin, INPUT_PULLUP);
   startButton.attach(startPin);
   startButton.interval(5);
+  targetButton.attach(targetPin);
+  targetButton.interval(5);
   reactButton.attach(reactPin);
   reactButton.interval(5);
 
@@ -435,9 +489,28 @@ void setup() {
   }
 }
 
+  static long dummy = analogReadLevel(waittimePin, 10);
+
 long randomtime()
 {
-  long poti = analogReadLevel(waittimePin, 10);
+  // set level 5 at start if poti does not work
+  static long poti = 5;
+  static long lastpoti = -1;
+  static long dummy = analogReadLevel(waittimePin, 10);
+  if (lastpoti == -1) 
+    // can't trust first call...
+    lastpoti = analogReadLevel(waittimePin, 10);
+  if (lastpoti > 10)
+    lastpoti = analogReadLevel(waittimePin, 10);
+  
+  long currpoti = analogReadLevel(waittimePin, 10);
+  if (lastpoti != currpoti) {
+    Serial.print("Poti val changed: ");
+    Serial.print(lastpoti);
+    Serial.print(" -> ");
+    Serial.println(currpoti);
+    lastpoti = poti = currpoti;
+  }
   long basetime = poti * 1000  + 1000;
   long randtime = random(basetime, basetime + 500);
   Serial.print("Poti val: ");
